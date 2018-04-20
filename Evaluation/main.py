@@ -2,9 +2,10 @@
 import os
 import csv
 import pandas as pd
-from Evaluation.dataexplore.dataExplore import load_data
+# from Evaluation.dataexplore.dataExplore import load_data
 import time
 from sklearn.model_selection import train_test_split
+import lightgbm as lgb
 
 # path_train = "/data/dm/train.csv"  # 训练文件
 # path_test = "/data/dm/test.csv"  # 测试文件
@@ -26,6 +27,10 @@ use_feature_list = ['time', 'date', 'hour', 'minute',
        'heg_max', 'heg_min', 'heg_mean', 'heg', 'vol', 'sp_max', 'sp_mean',
        'call_ratio_0', 'call_ratio_1']
 
+def load_data(path_train,path_test):
+    train_data = pd.read_csv(path_train)
+    test_data = pd.read_csv(path_test)
+    return train_data,test_data
 
 def read_csv():
     """
@@ -169,6 +174,8 @@ def process():
     # 训练集和验证集划分
     train_train, train_val = train_test_split(train, test_size=0.2, random_state=42)
     print("train_train_shape:"+str(train_train.shape)+"  train_val_shape:"+str(train_val.shape))
+
+
 
 
 
