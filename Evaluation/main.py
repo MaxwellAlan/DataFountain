@@ -7,10 +7,10 @@ import time
 from sklearn.model_selection import train_test_split
 import lightgbm as lgb
 
-# path_train = "/data/dm/train.csv"  # 训练文件
-# path_test = "/data/dm/test.csv"  # 测试文件
-path_train = "../resource/PINGAN-2018-train_demo.csv"
-path_test = "../resource/PINGAN-2018-test_demo.csv"
+path_train = "/data/dm/train.csv"  # 训练文件
+path_test = "/data/dm/test.csv"  # 测试文件
+# path_train = "../resource/PINGAN-2018-train_demo.csv"
+# path_test = "../resource/PINGAN-2018-test_demo.csv"
 
 path_test_out = "model/"  # 预测结果输出路径为model/xx.csv,有且只能有一个文件并且是CSV格式。
 
@@ -75,6 +75,8 @@ def process():
     train_data,test_data = load_data(path_train,path_test)
 
     # 拼接训练集和测试集进行特征工程
+    TRAIN_ID_MAX = train_data['TERMINALNO'].max()
+    test_data['TERMINALNO'] = test_data['TERMINALNO'] + TRAIN_ID_MAX
     data = pd.concat([train_data, test_data])
     # 重置index
     data.reset_index(drop=True, inplace=True)
@@ -175,11 +177,14 @@ def process():
     train_train, train_val = train_test_split(train, test_size=0.2, random_state=42)
     print("train_train_shape:"+str(train_train.shape)+"  train_val_shape:"+str(train_val.shape))
 
+    lgbmodel = lgb.LGBMRegressor(num_leaves=63, max_depth=7, n_estimators=20000, n_jobs=20)
 
+    lgbmodel.fit(X=train_train[use_feature_list], y=train_train['Y'],
+                 eval_set=(train_val[use_feature_list], train_val['Y']), early_stopping_rounds=200)
 
-
-
-
+    test['Pred'] = lgbmodel.predict(test[use_feature_list])
+    test['Id'] = test['TERMINALNO'] - TRAIN_ID_MAX
+    test[['Id','Pred']].to_csv(path_test_out+"test.csv",index=False)
 
     # if EXPLORE_FLAG:
     #     # print("***************Base Data Explore******************")
@@ -228,23 +233,23 @@ def process():
 
 
 
-    with open(path_test) as lines:
-        with(open(os.path.join(path_test_out, "test.csv"), mode="w")) as outer:
-            writer = csv.writer(outer)
-            i = 0
-            ret_set = set([])
-            for line in lines:
-                if i == 0:
-                    i += 1
-                    writer.writerow(["Id", "Pred"])  # 只有两列，一列Id为用户Id，一列Pred为预测结果(请注意大小写)。
-                    continue
-                item = line.split(",")
-                if item[0] in ret_set:
-                    continue
-                # 此处使用随机值模拟程序预测结果
-                writer.writerow([item[0], np.random.rand()]) # 随机值
-                
-                ret_set.add(item[0])  # 根据赛题要求，ID必须唯一。输出预测值时请注意去重
+    # with open(path_test) as lines:
+    #     with(open(os.path.join(path_test_out, "test.csv"), mode="w")) as outer:
+    #         writer = csv.writer(outer)
+    #         i = 0
+    #         ret_set = set([])
+    #         for line in lines:
+    #             if i == 0:
+    #                 i += 1
+    #                 writer.writerow(["Id", "Pred"])  # 只有两列，一列Id为用户Id，一列Pred为预测结果(请注意大小写)。
+    #                 continue
+    #             item = line.split(",")
+    #             if item[0] in ret_set:
+    #                 continue
+    #             # 此处使用随机值模拟程序预测结果
+    #             writer.writerow([item[0], np.random.rand()]) # 随机值
+    #
+    #             ret_set.add(item[0])  # 根据赛题要求，ID必须唯一。输出预测值时请注意去重
 
 
 if __name__ == "__main__":
