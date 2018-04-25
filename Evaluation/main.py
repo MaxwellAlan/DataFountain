@@ -75,7 +75,7 @@ def process():
     train_data,test_data = load_data(path_train,path_test)
 
     # 拼接训练集和测试集进行特征工程
-    TRAIN_ID_MAX = train_data['TERMINALNO'].max()
+    TRAIN_ID_MAX = train_data['TERMINALNO'].max() + 10
     test_data['TERMINALNO'] = test_data['TERMINALNO'] + TRAIN_ID_MAX
     data = pd.concat([train_data, test_data])
     # 重置index
@@ -177,8 +177,8 @@ def process():
     train_train, train_val = train_test_split(train, test_size=0.2, random_state=42)
     print("train_train_shape:"+str(train_train.shape)+"  train_val_shape:"+str(train_val.shape))
 
+    #模型训练
     lgbmodel = lgb.LGBMRegressor(num_leaves=63, max_depth=7, n_estimators=20000, n_jobs=20)
-
     lgbmodel.fit(X=train_train[use_feature_list], y=train_train['Y'],
                  eval_set=(train_val[use_feature_list], train_val['Y']), early_stopping_rounds=200)
 
