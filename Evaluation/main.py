@@ -1,12 +1,13 @@
 # -*- coding:utf8 -*-
-import os
-import csv
 import pandas as pd
-# from Evaluation.dataexplore.dataExplore import load_data
 import time
 from sklearn.model_selection import train_test_split
 import lightgbm as lgb
 from math import sqrt
+import warnings
+
+warnings.filterwarnings('ignore')
+
 
 # path_train = "/data/dm/train.csv"  # 训练文件
 # path_test = "/data/dm/test.csv"  # 测试文件
@@ -230,12 +231,34 @@ def process():
     #     'call_ratio_0', 'call_ratio_1', 'dis', 'ave_dri_time', 'dri_time']
 
     # 归一化
+    feature['trip_max'] = feature['trip_max'].apply(
+        lambda x: (x - feature['trip_max'].min()) / (feature['trip_max'].max() - feature['trip_max'].min()))
+    feature['lon_max'] = feature['lon_max'].apply(
+        lambda x: (x - feature['lon_max'].min()) / (feature['lon_max'].max() - feature['lon_max'].min()))
+    feature['lon_min'] = feature['lon_min'].apply(
+        lambda x: (x - feature['lon_min'].min()) / (feature['lon_min'].max() - feature['lon_min'].min()))
     feature['lon'] = feature['lon'].apply(
         lambda x: (x - feature['lon'].min()) / (feature['lon'].max() - feature['lon'].min()))
+    feature['lat_min'] = feature['lat_min'].apply(
+        lambda x: (x - feature['lat_min'].min()) / (feature['lat_min'].max() - feature['lat_min'].min()))
+    feature['lat_max'] = feature['lat_max'].apply(
+        lambda x: (x - feature['lat_max'].min()) / (feature['lat_max'].max() - feature['lat_max'].min()))
     feature['lat'] = feature['lat'].apply(
         lambda x: (x - feature['lat'].min()) / (feature['lat'].max() - feature['lat'].min()))
+    feature['heg_min'] = feature['heg_min'].apply(
+        lambda x: (x - feature['heg_min'].min()) / (feature['heg_min'].max() - feature['heg_min'].min()))
+    feature['heg_max'] = feature['heg_max'].apply(
+        lambda x: (x - feature['heg_max'].min()) / (feature['heg_max'].max() - feature['heg_max'].min()))
+    feature['heg'] = feature['heg'].apply(
+        lambda x: (x - feature['heg'].min()) / (feature['heg'].max() - feature['heg'].min()))
+    feature['heg_mean'] = feature['heg_mean'].apply(
+        lambda x: (x - feature['heg_mean'].min()) / (feature['heg_mean'].max() - feature['heg_mean'].min()))
     feature['vol'] = feature['vol'].apply(
         lambda x: (x - feature['vol'].min()) / (feature['vol'].max() - feature['vol'].min()))
+    feature['sp_max'] = feature['sp_max'].apply(
+        lambda x: (x - feature['sp_max'].min()) / (feature['sp_max'].max() - feature['sp_max'].min()))
+    feature['sp_mean'] = feature['sp_mean'].apply(
+        lambda x: (x - feature['sp_mean'].min()) / (feature['sp_mean'].max() - feature['sp_mean'].min()))
     feature['ave_dri_time'] = feature['ave_dri_time'].apply(
         lambda x: (x - feature['ave_dri_time'].min()) / (feature['ave_dri_time'].max() - feature['ave_dri_time'].min()))
     feature['dri_time'] = feature['dri_time'].apply(
@@ -243,25 +266,27 @@ def process():
     feature['dis'] = feature['dis'].apply(
         lambda x: (x - feature['dis'].min()) / (feature['dis'].max() - feature['dis'].min()))
 
+
+
     # 切割训练集和测试集
     train = data[0:len(train_data)]
     test = data[len(train_data):]
     train = pd.merge(train, feature, how='left', on='TERMINALNO')
     test = pd.merge(test, feature, how='left', on='TERMINALNO')
-
+    train['Y'] = train['Y'].apply(lambda x: ((x - train['Y'].min()) / (train['Y'].max() - train['Y'].min())))
     # 训练集和验证集划分
     train_train, train_val = train_test_split(train, test_size=0.2, random_state=42)
     print("train_train_shape:"+str(train_train.shape)+"  train_val_shape:"+str(train_val.shape))
 
-    train_train['Y'] = train_train['Y'].apply(
-        lambda x: ((x - train_train['Y'].min())/(train_train['Y'].max()-train_train['Y'].min()))
-    )
-    train_val['Y'] = train_val['Y'].apply(
-        lambda x: ((x - train_val['Y'].min()) / (train_val['Y'].max() - train_val['Y'].min()))
-    )
+    # train_train['Y'] = train_train['Y'].apply(
+    #     lambda x: ((x - train_train['Y'].min())/(train_train['Y'].max()-train_train['Y'].min()))
+    # )
+    # train_val['Y'] = train_val['Y'].apply(
+    #     lambda x: ((x - train_val['Y'].min()) / (train_val['Y'].max() - train_val['Y'].min()))
+    # )
 
     #模型训练
-    lgbmodel = lgb.LGBMRegressor(num_leaves=31, max_depth=7, n_estimators=20000,learning_rate=0.001,n_jobs=20)
+    lgbmodel = lgb.LGBMRegressor(num_leaves=63, max_depth=7, n_estimators=20000,learning_rate=0.0001,n_jobs=20,random_state=2018)
     lgbmodel.fit(X=train_train[use_feature_list], y=train_train['Y'],
                  eval_set=(train_val[use_feature_list], train_val['Y']), early_stopping_rounds=200,verbose=False)
 
