@@ -1,12 +1,25 @@
 # -*- coding:utf8 -*-
 import pandas as pd
+import numpy as np
 import time
 from sklearn.model_selection import train_test_split
 import lightgbm as lgb
 from math import sqrt
 import warnings
 import gc
+import subprocess
+import re
 
+keydic = {"MemTotal":"TotalMem","MemFree":"FreeMem","MemAvailable":"AvaiableMem","Cached":"Cached"}
+def command(command):
+    p = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    resultDic = {}
+    for line in p.stdout.readlines():
+        line = str(line,encoding="utf-8")
+        result = re.split("\s*",line)
+        if result[0][:-1] in keydic:
+            resultDic[keydic[result[0][:-1]]] = "%.2f" %(int(result[1])/(1024**2))
+    return resultDic
 warnings.filterwarnings('ignore')
 
 
@@ -81,8 +94,9 @@ def process():
     处理过程，在示例中，使用随机方法生成结果，并将结果文件存储到预测结果路径下。
     :return: 
     """
+    print(command("cat /proc/meminfo"))
     train_data,test_data = load_data(path_train,path_test)
-    print(train_data.shape,test_data.shape)
+    # print(train_data.info(),test_data.info())
     # 去重
     train_data.drop_duplicates(subset=['TERMINALNO','TIME'],inplace=True)
     test_data.drop_duplicates(subset=['TERMINALNO', 'TIME'], inplace=True)
@@ -92,19 +106,22 @@ def process():
     TRAIN_ID_MAX = train_data['TERMINALNO'].max() + 10
     test_data['TERMINALNO'] = test_data['TERMINALNO'] + TRAIN_ID_MAX
     data = pd.concat([train_data, test_data])
+    print(data.info())
     # print(" drop duplicates")
     # 重置index
     data.reset_index(drop=True, inplace=True)
+    data[['CALLSTATE', 'DIRECTION', 'HEIGHT', 'LATITUDE', 'LONGITUDE', 'SPEED','TERMINALNO', 'TIME', 'TRIP_ID']].fillna(0.,inplace=True)
+    # print(command("cat /proc/meminfo"))
     del train_data, test_data
     gc.collect()
-
+    # print(command("cat /proc/meminfo"))
     #时间处理
     # 转换成时刻
     data['time'] = data['TIME'].apply(time_datetime)
     data['date'] = data['TIME'].apply(time_date)
     data['hour'] = data['TIME'].apply(time_hour)
     data['minute'] = data['TIME'].apply(time_minute)
-    print("time precessed...")
+    print("time precessed...",command("cat /proc/meminfo"))
 
     # trip_max
     feature = pd.DataFrame()
@@ -156,7 +173,7 @@ def process():
 
     # volu 活动区间体积
     feature['vol'] = feature['lon'] * feature['lat'] * feature['heg']
-    print("lon,lat,heg precessed....")
+    print("lon,lat,heg precessed....",command("cat /proc/meminfo"))
 
     # 速度 sp_max sp_mean
     # spmax = pd.DataFrame()
@@ -167,7 +184,7 @@ def process():
         ['TERMINALNO', 'SPEED']]
     # feature = pd.merge(feature, spmax, how='left', on='TERMINALNO')
     # feature = pd.merge(feature, spmean, how='left', on='TERMINALNO')
-    print("sp_max,sp_mean finished")
+    print("sp_max,sp_mean finished",command("cat /proc/meminfo"))
     # del spmax,spmean
     # gc.collect()
 
@@ -215,7 +232,7 @@ def process():
     feature = pd.merge(feature, disdata, how='left', on='TERMINALNO')
     del sortdata,disdata
     gc.collect()
-    print("dis finished")
+    print("dis finished",command("cat /proc/meminfo"))
 
     # 驾驶时长
     # 1.去重
@@ -311,18 +328,18 @@ def process():
     lgbmodel = lgb.LGBMRegressor(
         boosting_type='gbdt',
         objective='regression',
-        num_leaves=127,
+        num_leaves=63,
         max_depth=8,
         n_estimators=20000,
         learning_rate=0.05,
         # n_jobs=20,
-        random_state=2018
+        random_state=42
     )
     lgbmodel.fit(
         X=train_train[use_feature_list],
         y=train_train['Y'],
         eval_set=(train_val[use_feature_list], train_val['Y']),
-        early_stopping_rounds=500,
+        early_stopping_rounds=200,
         verbose=True
     )
 
