@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 import time
 from sklearn.model_selection import train_test_split
+from sklearn.grid_search import GridSearchCV
 import lightgbm as lgb
 from math import sqrt
 import warnings
@@ -11,10 +12,10 @@ import subprocess
 import re
 warnings.filterwarnings('ignore')
 
-path_train = "/data/dm/train.csv"  # 训练文件
-path_test = "/data/dm/test.csv"  # 测试文件
-# path_train = "../resource/PINGAN-2018-train_demo.csv"
-# path_test = "../resource/PINGAN-2018-test_demo.csv"
+# path_train = "/data/dm/train.csv"  # 训练文件
+# path_test = "/data/dm/test.csv"  # 测试文件
+path_train = "../resource/PINGAN-2018-train_demo.csv"
+path_test = "../resource/PINGAN-2018-test_demo.csv"
 
 path_test_out = "model/"  # 预测结果输出路径为model/xx.csv,有且只能有一个文件并且是CSV格式。
 
@@ -25,9 +26,21 @@ all_feature_list = ['CALLSTATE', 'DIRECTION', 'HEIGHT', 'LATITUDE', 'LONGITUDE',
        'call0', 'call1', 'call_ratio_0', 'call_ratio_1', 'dis', 'ave_dri_time', 'dri_time']
 
 use_feature_list = [
-    'trip_max', 'lon_max', 'lon_min', 'lon_50','lat_max', 'lat_min', 'lat_50', 'heg_max',
-    'heg_min', 'heg_mean', 'heg_50', 'sp_max', 'sp_mean', 'sp_50', 'dis', 'avg_dis',
-    'dri_time', 'ave_dri_time', 'dri_time_trip_max']
+    'trip_max', 'lon_max', 'lon_min', 'lon_50', 'lat_max',
+    'lat_min', 'lat_50', 'heg_max', 'heg_min', 'heg_mean', 'heg_50',
+    'sp_max', 'sp_mean', 'sp_50', 'dis', 'avg_dis',
+    'ave_dri_time', 'dri_time'
+]
+
+params = {
+    "boosting_type":'gbdt',
+    "objective":'regression',
+    "num_leaves":[31,63,127,255],
+    "max_depth":[5,6,7,8,9,10,16,32],
+    "learning_rate":[0.001,0.005,0.01,0.05],
+    "n_estimators":20000,
+    "random_state":42
+}
 
 
 # 查看内存
@@ -212,18 +225,17 @@ def process():
     data.sort_values(['TERMINALNO', 'TIME'], inplace=True)
     data['diff_time'] = data.groupby(['TERMINALNO'])['TIME'].diff()
     data.fillna(0.0, inplace=True)
-    data['diff_time'] = data['diff_time'].apply(f)
-    dri_time_trip_max = pd.DataFrame()
-    dri_time_trip_max = pd.DataFrame(data.groupby(['TERMINALNO', 'TRIP_ID'])['diff_time'].sum()).reset_index()
 
-    # 计算驾驶总时长,用户单段最大驾驶时长(trip分割不准确)
-    feature[['TERMINALNO', 'dri_time']] = pd.DataFrame(
-        data['diff_time'].groupby(data['TERMINALNO']).sum()).reset_index()
-    feature[['TERMINALNO', 'dri_time_trip_max']] = pd.DataFrame(
-        dri_time_trip_max['diff_time'].groupby(dri_time_trip_max['TERMINALNO']).max()).reset_index()
+    data['diff_time'] = data['diff_time'].apply(lambda x: x / 60)
+    data['diff_time'] = data['diff_time'].apply(f)
+    dri_time_sum = pd.DataFrame()
+    dri_time_sum[['TERMINALNO', 'dri_time']] = data['diff_time'].groupby(data['TERMINALNO']).sum().reset_index()[
+        ['TERMINALNO', 'diff_time']]
+    feature = pd.merge(feature, dri_time_sum, how='left', on='TERMINALNO')
+    # 平均时长
     feature['ave_dri_time'] = feature['dri_time'] / feature['trip_max']
 
-    del train_data, test_data, data, dri_time_trip_max
+    del train_data, test_data, data, dri_time_sum
     gc.collect()
 
     # 归一化
@@ -261,14 +273,14 @@ def process():
         lambda x: (x - feature['dri_time'].min()) / (feature['dri_time'].max() - feature['dri_time'].min()))
     feature['dis'] = feature['dis'].apply(
         lambda x: (x - feature['dis'].min()) / (feature['dis'].max() - feature['dis'].min()))
-    feature['dri_time_trip_max'] = feature['dri_time_trip_max'].apply(
-        lambda x: (x - feature['dri_time_trip_max'].min()) / (
-                    feature['dri_time_trip_max'].max() - feature['dri_time_trip_max'].min()))
+    # feature['dri_time_trip_max'] = feature['dri_time_trip_max'].apply(
+    #     lambda x: (x - feature['dri_time_trip_max'].min()) / (
+    #                 feature['dri_time_trip_max'].max() - feature['dri_time_trip_max'].min()))
     feature['avg_dis'] = feature['avg_dis'].apply(
         lambda x: (x - feature['avg_dis'].min()) / (feature['avg_dis'].max() - feature['avg_dis'].min()))
     print("data normalization..")
     print("Feature End. feature shape:" + str(feature.shape))
-    print("generate train & test set")
+    print(command("cat /proc/meminfo"))
 
     # train_Y
     train_Y = pd.read_csv(path_train, usecols=['TERMINALNO', 'Y'])
@@ -293,28 +305,65 @@ def process():
     train_train, train_val = train_test_split(train, test_size=0.2, random_state=42)
     print("train_train_shape:" + str(train_train.shape) + "  train_val_shape:" + str(train_val.shape))
     print("model training")
+    print(command("cat /proc/meminfo"))
 
-    # 模型训练
+    # 模型训练及调参
+    # lgbmodel = lgb.LGBMRegressor(
+    #     boosting_type='gbdt',
+    #     objective='regression',
+    #     # num_leaves=63,
+    #     # max_depth=8,
+    #     n_estimators=20000,
+    #     # learning_rate=0.05,
+    #     # n_jobs=20,
+    #     random_state=42
+    # )
+    # lgbmodel.fit(
+    #     X=train_train[use_feature_list],
+    #     y=train_train['Y'],
+    #     eval_set=(train_val[use_feature_list], train_val['Y']),
+    #     early_stopping_rounds=200,
+    #     verbose=False
+    # )
+    # 调参
+
+    tune_params = {
+        'max_depth': [8, 16],
+        'num_leaves': [31, 63,127],
+        'learning_rate': [0.001, 0.002,0.01],
+        'n_estimators': [300, 500, 1000],
+    }
     lgbmodel = lgb.LGBMRegressor(
-        boosting_type='gbdt',
-        objective='regression',
-        num_leaves=63,
-        max_depth=8,
-        n_estimators=20000,
-        learning_rate=0.05,
+        #     boosting_type='gbdt',
+        #     objective='regression',
+        #     num_leaves=63,
+        #     max_depth=8,
+        #     n_estimators=1000,
+        #     learning_rate=0.05,
         # n_jobs=20,
         random_state=42
     )
-    lgbmodel.fit(
-        X=train_train[use_feature_list],
-        y=train_train['Y'],
-        eval_set=(train_val[use_feature_list], train_val['Y']),
-        early_stopping_rounds=200,
-        verbose=True
-    )
+    gsearch = GridSearchCV(lgbmodel, param_grid=tune_params, cv=5,verbose=True)
+    gsearch.fit(train[use_feature_list], train['Y'])
 
-    fea_imp = pd.Series(lgbmodel.feature_importances_, use_feature_list).sort_values(ascending=False)
-    print(fea_imp)
+    bestparams = gsearch.best_estimator_.get_params()
+
+    print(bestparams)
+    #
+    # bestmodel = lgb.LGBMRegressor(
+    #     boosting_type='gbdt',
+    #     objective='regression',
+    #     num_leaves=bestparams['num_leaves'],
+    #     max_depth=bestparams['max_depth'],
+    #     n_estimators=bestparams['n_estimators'],
+    #     learning_rate=bestparams['learning_rate'],
+    #     random_state=bestparams['random_state']
+    # )
+    #
+    # bestmodel.fit(X=train[use_feature_list], y=train['Y'])
+
+    # fea_imp = pd.Series(gsearch.feature_importances_, use_feature_list).sort_values(ascending=False)
+    # print(fea_imp)
 
 
     # train_data,test_data = load_data(path_train,path_test)
@@ -456,8 +505,8 @@ def process():
     # gc.collect()
     # print("dis finished",command("cat /proc/meminfo"))
     #
-    # # 驾驶时长
-    # # 1.去重
+    # 驾驶时长
+    # 1.去重
     # dri_time = data[['TERMINALNO', 'TIME', 'TRIP_ID']]
     # dri_time.drop_duplicates(subset=['TERMINALNO', 'TIME'], inplace=True)
     # # 2.按 TERMINALNO 和 time 排序
@@ -568,7 +617,7 @@ def process():
     # fea_imp = pd.Series(lgbmodel.feature_importances_,use_feature_list).sort_values(ascending=False)
     # print(fea_imp)
 
-    test['Pred'] = lgbmodel.predict(test[use_feature_list])
+    test['Pred'] = gsearch.predict(test[use_feature_list])
     test['Id'] = test['TERMINALNO'] - TRAIN_ID_MAX
     test[['Id','Pred']].to_csv(path_test_out+"test.csv",index=False)
 
