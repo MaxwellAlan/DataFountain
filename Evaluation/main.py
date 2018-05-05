@@ -5,30 +5,44 @@ import time
 from sklearn.model_selection import train_test_split
 from sklearn.grid_search import GridSearchCV
 import lightgbm as lgb
-from math import sqrt
+from math import sqrt,radians,cos,sin,asin
 import warnings
 import gc
 import subprocess
 import re
+import datetime
 warnings.filterwarnings('ignore')
 
-# path_train = "/data/dm/train.csv"  # 训练文件
-# path_test = "/data/dm/test.csv"  # 测试文件
-path_train = "../resource/PINGAN-2018-train_demo.csv"
-path_test = "../resource/PINGAN-2018-test_demo.csv"
+start_time = datetime.datetime.now()
+
+path_train = "/data/dm/train.csv"  # 训练文件
+path_test = "/data/dm/test.csv"  # 测试文件
+# path_train = "../resource/PINGAN-2018-train_demo.csv"
+# path_test = "../resource/PINGAN-2018-test_demo.csv"
 
 path_test_out = "model/"  # 预测结果输出路径为model/xx.csv,有且只能有一个文件并且是CSV格式。
 
-all_feature_list = ['CALLSTATE', 'DIRECTION', 'HEIGHT', 'LATITUDE', 'LONGITUDE', 'SPEED',
-       'TERMINALNO', 'TIME', 'TRIP_ID', 'Y', 'time', 'date', 'hour', 'minute',
-       'trip_max', 'lon_max', 'lon_min', 'lon', 'lat_max', 'lat_min', 'lat',
-       'heg_max', 'heg_min', 'heg_mean', 'heg', 'vol', 'sp_max', 'sp_mean',
-       'call0', 'call1', 'call_ratio_0', 'call_ratio_1', 'dis', 'ave_dri_time', 'dri_time']
+all_feature_list = [
+    'CALLSTATE', 'DIRECTION', 'HEIGHT', 'LATITUDE', 'LONGITUDE', 'SPEED','TERMINALNO', 'TIME', 'TRIP_ID', 'Y',
+    'time', 'date', 'hour', 'minute',
+    'trip_max',
+    'lon_max', 'lon_min', 'lon_std', 'lon',
+    'lat_max', 'lat_min', 'lat',
+    'heg_max', 'heg_min', 'heg_mean', 'heg',
+    'vol',
+    'sp_max', 'sp_mean',
+    'call0', 'call1', 'call_ratio_0', 'call_ratio_1',
+    'dis',
+    'ave_dri_time', 'dri_time'
+]
 
 use_feature_list = [
-    'trip_max', 'lon_max', 'lon_min', 'lon_50', 'lat_max',
-    'lat_min', 'lat_50', 'heg_max', 'heg_min', 'heg_mean', 'heg_50',
-    'sp_max', 'sp_mean', 'sp_50', 'dis', 'avg_dis',
+    'trip_max',
+    'lon_max', 'lon_min', 'lon_50', 'lon_std',
+    'lat_max', 'lat_min', 'lat_50', 'lat_std',
+    'heg_max', 'heg_min', 'heg_mean', 'heg_50', 'heg_std'
+    'sp_max', 'sp_mean', 'sp_50', 'sp_std',
+    'dis', 'avg_dis',
     'ave_dri_time', 'dri_time'
 ]
 
@@ -54,6 +68,21 @@ def command(command):
         if result[0][:-1] in keydic:
             resultDic[keydic[result[0][:-1]]] = "%.2f" %(int(result[1])/(1024**2))
     return resultDic
+
+def haversine1(lon1, lat1, lon2, lat2):  # 经度1，纬度1，经度2，纬度2 （十进制度数）
+    """
+    Calculate the great circle distance between two points
+    on the earth (specified in decimal degrees)
+    """
+    # 将十进制度数转化为弧度
+    lon1, lat1, lon2, lat2 = map(radians, [lon1, lat1, lon2, lat2])
+    # haversine公式
+    dlon = lon2 - lon1
+    dlat = lat2 - lat1
+    a = sin(dlat / 2) ** 2 + cos(lat1) * cos(lat2) * sin(dlon / 2) ** 2
+    c = 2 * asin(sqrt(a))
+    r = 6371  # 地球平均半径，单位为公里
+    return c * r * 1000
 
 def load_data(path_train,path_test):
     train_data = pd.read_csv(path_train)
@@ -125,7 +154,7 @@ def process():
     del train_data, test_data, data
     gc.collect()
 
-    # 2.lon_max lon_min lon_50
+    # 2.lon_max lon_min lon_50 lon_std
     train_data = pd.read_csv(path_train, usecols=['TERMINALNO', 'LONGITUDE'])
     test_data = pd.read_csv(path_test, usecols=['TERMINALNO', 'LONGITUDE'])
 
@@ -137,10 +166,11 @@ def process():
     feature[['TERMINALNO', 'lon_min']] = pd.DataFrame(data['LONGITUDE'].groupby(data['TERMINALNO']).min()).reset_index()
     feature[['TERMINALNO', 'lon_50']] = pd.DataFrame(
         data['LONGITUDE'].groupby(data['TERMINALNO']).quantile()).reset_index()
+    feature[['TERMINALNO','lon_std']] = pd.DataFrame(data['LONGITUDE'].groupby(data['TERMINALNO']).std()).reset_index()
     del train_data, test_data, data
     gc.collect()
 
-    # 3.lat_max lat_min lat_50
+    # 3.lat_max lat_min lat_50 lat_std
     train_data = pd.read_csv(path_train, usecols=['TERMINALNO', 'LATITUDE'])
     test_data = pd.read_csv(path_test, usecols=['TERMINALNO', 'LATITUDE'])
 
@@ -150,12 +180,13 @@ def process():
 
     feature[['TERMINALNO', 'lat_max']] = pd.DataFrame(data['LATITUDE'].groupby(data['TERMINALNO']).max()).reset_index()
     feature[['TERMINALNO', 'lat_min']] = pd.DataFrame(data['LATITUDE'].groupby(data['TERMINALNO']).min()).reset_index()
+    feature[['TERMINALNO', 'lat_std']] = pd.DataFrame(data['LATITUDE'].groupby(data['TERMINALNO']).std()).reset_index()
     feature[['TERMINALNO', 'lat_50']] = pd.DataFrame(
         data['LATITUDE'].groupby(data['TERMINALNO']).quantile()).reset_index()
     del train_data, test_data, data
     gc.collect()
 
-    # 4.heg_max heg_min heg_mean heg_50
+    # 4.heg_max heg_min heg_mean heg_50 heg_std
     train_data = pd.read_csv(path_train, usecols=['TERMINALNO', 'HEIGHT'])
     test_data = pd.read_csv(path_test, usecols=['TERMINALNO', 'HEIGHT'])
 
@@ -167,6 +198,7 @@ def process():
     feature[['TERMINALNO', 'heg_max']] = pd.DataFrame(data['HEIGHT'].groupby(data['TERMINALNO']).max()).reset_index()
     feature[['TERMINALNO', 'heg_min']] = pd.DataFrame(data['HEIGHT'].groupby(data['TERMINALNO']).min()).reset_index()
     feature[['TERMINALNO', 'heg_mean']] = pd.DataFrame(data['HEIGHT'].groupby(data['TERMINALNO']).mean()).reset_index()
+    feature[['TERMINALNO', 'heg_std']] = pd.DataFrame(data['HEIGHT'].groupby(data['TERMINALNO']).std()).reset_index()
     feature[['TERMINALNO', 'heg_50']] = pd.DataFrame(
         data['HEIGHT'].groupby(data['TERMINALNO']).quantile()).reset_index()
     del train_data, test_data, data
@@ -183,6 +215,7 @@ def process():
 
     feature[['TERMINALNO', 'sp_max']] = pd.DataFrame(data['SPEED'].groupby(data['TERMINALNO']).max()).reset_index()
     feature[['TERMINALNO', 'sp_mean']] = pd.DataFrame(data['SPEED'].groupby(data['TERMINALNO']).mean()).reset_index()
+    feature[['TERMINALNO', 'sp_std']] = pd.DataFrame(data['SPEED'].groupby(data['TERMINALNO']).std()).reset_index()
     feature[['TERMINALNO', 'sp_50']] = pd.DataFrame(data['SPEED'].groupby(data['TERMINALNO']).quantile()).reset_index()
     del train_data, test_data, data
     gc.collect()
@@ -238,6 +271,16 @@ def process():
     del train_data, test_data, data, dri_time_sum
     gc.collect()
 
+    # # 9.call state
+    # train_data = pd.read_csv(path_train,usecols=['TERMINALNO','TIME','CALLSTATE'])
+    # test_data = pd.read_csv(path_test,usecols=['TERMINALNO','TIME','CALLSTATE'])
+    #
+    # test_data['TERMINALNO'] = test_data['TERMINALNO'] + TRAIN_ID_MAX
+    # data = pd.concat([train_data, test_data])
+    # data.drop_duplicates(subset=['TERMINALNO', 'TIME'], inplace=True)
+    # data.fillna(0.0, inplace=True)
+
+
     # 归一化
     feature['trip_max'] = feature['trip_max'].apply(
         lambda x: (x - feature['trip_max'].min()) / (feature['trip_max'].max() - feature['trip_max'].min()))
@@ -245,6 +288,8 @@ def process():
         lambda x: (x - feature['lon_max'].min()) / (feature['lon_max'].max() - feature['lon_max'].min()))
     feature['lon_min'] = feature['lon_min'].apply(
         lambda x: (x - feature['lon_min'].min()) / (feature['lon_min'].max() - feature['lon_min'].min()))
+    feature['lon_std'] = feature['lon_std'].apply(
+        lambda x: (x - feature['lon_std'].min()) / (feature['lon_std'].max() - feature['lon_std'].min()))
     feature['lon_50'] = feature['lon_50'].apply(
         lambda x: (x - feature['lon_50'].min()) / (feature['lon_50'].max() - feature['lon_50'].min()))
     feature['lat_min'] = feature['lat_min'].apply(
@@ -253,16 +298,22 @@ def process():
         lambda x: (x - feature['lat_max'].min()) / (feature['lat_max'].max() - feature['lat_max'].min()))
     feature['lat_50'] = feature['lat_50'].apply(
         lambda x: (x - feature['lat_50'].min()) / (feature['lat_50'].max() - feature['lat_50'].min()))
+    feature['lat_std'] = feature['lat_std'].apply(
+        lambda x: (x - feature['lat_std'].min()) / (feature['lat_std'].max() - feature['lat_std'].min()))
     feature['heg_min'] = feature['heg_min'].apply(
         lambda x: (x - feature['heg_min'].min()) / (feature['heg_min'].max() - feature['heg_min'].min()))
     feature['heg_max'] = feature['heg_max'].apply(
         lambda x: (x - feature['heg_max'].min()) / (feature['heg_max'].max() - feature['heg_max'].min()))
     feature['heg_50'] = feature['heg_50'].apply(
         lambda x: (x - feature['heg_50'].min()) / (feature['heg_50'].max() - feature['heg_50'].min()))
+    feature['heg_std'] = feature['heg_std'].apply(
+        lambda x: (x - feature['heg_std'].min()) / (feature['heg_std'].max() - feature['heg_std'].min()))
     feature['heg_mean'] = feature['heg_mean'].apply(
         lambda x: (x - feature['heg_mean'].min()) / (feature['heg_mean'].max() - feature['heg_mean'].min()))
     feature['sp_50'] = feature['sp_50'].apply(
         lambda x: (x - feature['sp_50'].min()) / (feature['sp_50'].max() - feature['sp_50'].min()))
+    feature['sp_std'] = feature['sp_std'].apply(
+        lambda x: (x - feature['sp_std'].min()) / (feature['sp_std'].max() - feature['sp_std'].min()))
     feature['sp_max'] = feature['sp_max'].apply(
         lambda x: (x - feature['sp_max'].min()) / (feature['sp_max'].max() - feature['sp_max'].min()))
     feature['sp_mean'] = feature['sp_mean'].apply(
@@ -281,6 +332,7 @@ def process():
     print("data normalization..")
     print("Feature End. feature shape:" + str(feature.shape))
     print(command("cat /proc/meminfo"))
+    feature_time = datetime.datetime.now()
 
     # train_Y
     train_Y = pd.read_csv(path_train, usecols=['TERMINALNO', 'Y'])
@@ -308,47 +360,47 @@ def process():
     print(command("cat /proc/meminfo"))
 
     # 模型训练及调参
-    # lgbmodel = lgb.LGBMRegressor(
-    #     boosting_type='gbdt',
-    #     objective='regression',
-    #     # num_leaves=63,
-    #     # max_depth=8,
-    #     n_estimators=20000,
-    #     # learning_rate=0.05,
-    #     # n_jobs=20,
-    #     random_state=42
-    # )
-    # lgbmodel.fit(
-    #     X=train_train[use_feature_list],
-    #     y=train_train['Y'],
-    #     eval_set=(train_val[use_feature_list], train_val['Y']),
-    #     early_stopping_rounds=200,
-    #     verbose=False
-    # )
-    # 调参
-
-    tune_params = {
-        'max_depth': [8, 16],
-        'num_leaves': [31, 63,127],
-        'learning_rate': [0.001, 0.002,0.01],
-        'n_estimators': [300, 500, 1000],
-    }
     lgbmodel = lgb.LGBMRegressor(
-        #     boosting_type='gbdt',
-        #     objective='regression',
-        #     num_leaves=63,
-        #     max_depth=8,
-        #     n_estimators=1000,
-        #     learning_rate=0.05,
+        boosting_type='gbdt',
+        objective='regression',
+        num_leaves=31,
+        max_depth=16,
+        n_estimators=20000,
+        learning_rate=0.001,
         # n_jobs=20,
         random_state=42
     )
-    gsearch = GridSearchCV(lgbmodel, param_grid=tune_params, cv=5,verbose=True)
-    gsearch.fit(train[use_feature_list], train['Y'])
-
-    bestparams = gsearch.best_estimator_.get_params()
-
-    print(bestparams)
+    lgbmodel.fit(
+        X=train_train[use_feature_list],
+        y=train_train['Y'],
+        eval_set=(train_val[use_feature_list], train_val['Y']),
+        early_stopping_rounds=200,
+        verbose=False
+    )
+    # # 调参
+    #
+    # tune_params = {
+    #     'max_depth': [8, 16],
+    #     'num_leaves': [31, 63,127],
+    #     'learning_rate': [0.001, 0.002,0.01],
+    #     'n_estimators': [300, 500, 1000],
+    # }
+    # lgbmodel = lgb.LGBMRegressor(
+    #     #     boosting_type='gbdt',
+    #     #     objective='regression',
+    #     #     num_leaves=63,
+    #     #     max_depth=8,
+    #     #     n_estimators=1000,
+    #     #     learning_rate=0.05,
+    #     # n_jobs=20,
+    #     random_state=42
+    # )
+    # gsearch = GridSearchCV(lgbmodel, param_grid=tune_params, cv=5)
+    # gsearch.fit(train[use_feature_list], train['Y'])
+    #
+    # bestparams = gsearch.best_estimator_.get_params()
+    #
+    # print(bestparams)
     #
     # bestmodel = lgb.LGBMRegressor(
     #     boosting_type='gbdt',
@@ -614,12 +666,14 @@ def process():
     #     verbose=True
     # )
     #
-    # fea_imp = pd.Series(lgbmodel.feature_importances_,use_feature_list).sort_values(ascending=False)
-    # print(fea_imp)
+    fea_imp = pd.Series(lgbmodel.feature_importances_,use_feature_list).sort_values(ascending=False)
+    print(fea_imp)
 
-    test['Pred'] = gsearch.predict(test[use_feature_list])
+    test['Pred'] = lgbmodel.predict(test[use_feature_list])
     test['Id'] = test['TERMINALNO'] - TRAIN_ID_MAX
     test[['Id','Pred']].to_csv(path_test_out+"test.csv",index=False)
+    end_time = datetime.datetime.now()
+    print("feature time:",(feature_time-start_time).seconds,"total time:",(end_time-start_time).seconds)
 
 if __name__ == "__main__":
     # print("****************** start **********************")
